@@ -21,7 +21,7 @@ def connectToDatabase():
         print(e)
         return None
 
-# Function to generate a pair of private and public keys
+'''# Function to generate a pair of private and public keys
 def generate_key():
     private_key = rsa.generate_private_key(
         public_exponent=65537, key_size=4096, backend=default_backend()
@@ -39,17 +39,44 @@ def serialize_key(key):
 # Function to deserialize a public key from bytes
 def deserialize_key(data):
     return serialization.load_pem_public_key(data, backend=default_backend())
+'''
+
+# Function to send encrypted message to client
+def send_message(message):
+
+    print("Message to be sent to client: ", message)   
+
+    '''encrypted_response = client_public_key.encrypt(
+        message.encode(),
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None,
+        ),
+    )'''
+    conn.sendall(message.encode())
+
+# Function to recieve message from client and decrypt it
+def recieve_message():
     
+    message = conn.recv(1024)
+    '''decrypted_message = server_private_key.decrypt(
+        encrypted_message,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None,
+        ),
+    )'''
+
+    return message.decode()
+
 # Function to hash a password
 def hashPassword(password):
     return hashlib.sha256(password.encode()).hexdigest()
     
 # Check if the Login details match in the database
-def checkLoginDetails(decrypted_message, connection):
-
-    # Separate decrypted_message to username and password
-    decrypted_message = decrypted_message.split(',')
-    username, password = decrypted_message[0], decrypted_message[1]
+def checkLoginDetails(username, password, connection):
     
     # Find the username and password in the database
     try:
@@ -63,6 +90,7 @@ def checkLoginDetails(decrypted_message, connection):
         print(e)
     return -1
 
+# Store user details to database in users table
 def registerUser(decrypted_message, connection):
 
     # Separate decrypted_message to username and password
@@ -77,97 +105,170 @@ def registerUser(decrypted_message, connection):
     except Exception as e:
         print(e)
 
+# Store encryption key details to database in files table [Post Encryption process]
+def storeKeyInDatabase(decrypted_message, connection):
 
+    # Separate decrypted message
+    data = decrypted_message.split(',')
+    print("data: ", data)
 
-# Main function to run the server
-def main():
+    # Establish data
+    username = data[4]
+    password = data[5]
+    user_id = checkLoginDetails(username, password, connection) # Get user ID for the given user
+    file_id = bytes.fromhex(data[0])
+    FileName = data[1] 
+    key_bytes = bytes.fromhex(data[2])
+    iv = bytes.fromhex(data[3])
 
-    # Initialize userID and Establish MYSQL connection
-    userId = 0
-    connection = connectToDatabase()
-    if connection is None:
-        sys.exit("MYSQL connection unsuccessful!")
+    # Instead of making new variables, I could put the elements of data for query, but new variables are helpful
+    print(file_id, "\n", FileName,"\n", key_bytes,"\n", iv)
+    encryptFileList = [file_id, FileName, key_bytes, iv]
+    print([len(i) for i in encryptFileList])
+
+    print("UserID: ", user_id, "\nFileID: ", file_id, "\nFileName: ", FileName, "\nkeybytes: ", key_bytes, "\nIV: ", iv)
+    print([len(file_id), len(FileName), len(key_bytes), len(iv)])
+    # Store data into the database
+    try:
+        with connection.cursor() as cursor:
+            query = "INSERT INTO files (user_id, file_id, file_name, encryption_key, iv) VALUES (%s, %s, %s, %s, %s)"
+            cursor.execute(query, (user_id, file_id, FileName, key_bytes, iv))
+        connection.commit()
+        print("Storing successful")
+    except Exception as e:
+        print(e)
+
+# [Pre Decryption Process]
+def getKeyFromDatabase(decrypted_message, connection):
+
+    # Establish data
+    data = decrypted_message.split(',')
+    file_id = bytes.fromhex(data[0])
+    username = data[1]
+    password = data[2]
+    user_id = checkLoginDetails(username, password, connection)
     
-    # Generate server's private and public keys
-    server_private_key, server_public_key = generate_key()
+    # Retrive details from database
+    try:
+        with connection.cursor() as cursor:
+            query = "SELECT file_name, encryption_key, iv FROM files WHERE file_id = %s AND user_id = %s"
+            cursor.execute(query, (file_id, user_id))
+            result = cursor.fetchone()
+            if result:
+                details = [result[0], result[1].hex(), result[2].hex()]
+                print(details)
+                return details
+    except Exception as e:
+        print(e)
+        return None
 
-    # Create a socket for the server
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+def deleteRecord(decrypted_message, connection):
 
-        # Bind the socket to an IP address and port
-        server_socket.bind(("192.168.0.103", 12345))
-        # Listen for incoming connections
-        server_socket.listen()
+    # Establish data
+    data = decrypted_message.split(',')
+    file_id = bytes.fromhex(data[0])
+    username = data[1]
+    password = data[2]
+    user_id = checkLoginDetails(username, password, connection)
+    try:
+        with connection.cursor() as cursor:
+            query = "DELETE FROM files WHERE file_id = %s AND user_id = %s"
+            cursor.execute(query, (file_id, user_id))
+        connection.commit()
+        return True
+    except Exception as e:
+        print(e)
 
-        print("Server is listening for incoming connections...")
 
-        # Accept a connection from a client
-        conn, addr = server_socket.accept()
+# ---GLOBAL STARTS HERE---
+        
+# Initialize userID and Establish MYSQL connection
+connection = connectToDatabase()
+if connection is None:
+    sys.exit("MYSQL connection unsuccessful!")
 
-        with conn:
-            print(f"Connection from {addr}")
+# Generate server's private and public keys
+'''server_private_key, server_public_key = generate_key()'''
 
-            # Send the server's public key to the client
-            conn.sendall(serialize_key(server_public_key))
+# Create a socket for the server
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
 
-            # Receive the client's public key
-            client_public_key_data = conn.recv(1024)
-            client_public_key = deserialize_key(client_public_key_data)
+    # Bind the socket to an IP address and port
+    server_socket.bind(("192.168.0.103", 12345))
+    # Listen for incoming connections
+    server_socket.listen()
 
-            while True:
+    print("Server is listening for incoming connections...")
 
-                # Receive and decrypt a message from the client
-                encrypted_message = conn.recv(1024)
-                decrypted_message = server_private_key.decrypt(
-                    encrypted_message,
-                    padding.OAEP(
-                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                        algorithm=hashes.SHA256(),
-                        label=None,
-                    ),
-                )
-                decrypted_message = decrypted_message.decode()
+    # Accept a connection from a client
+    conn, addr = server_socket.accept()
 
-                # Login Procedure
-                if decrypted_message[:5] == 'login':
+    with conn:
+        print(f"Connection from {addr}")
 
-                    # Function will fetch the userID for the given username and password
-                    user_id = checkLoginDetails(decrypted_message[6:], connection)
+        # Send the server's public key to the client
+        '''conn.sendall(serialize_key(server_public_key))'''
 
-                    # Encrypt and Send the user_id to client
-                    message = str(user_id)
-                    encrypted_user_id = client_public_key.encrypt(
-                        message.encode(),
-                        padding.OAEP(
-                            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                            algorithm=hashes.SHA256(),
-                            label=None,
-                        ),
-                    )
-                    conn.sendall(encrypted_user_id)
+        # Receive the client's public key
+        '''client_public_key_data = conn.recv(1024)
+        client_public_key = deserialize_key(client_public_key_data)'''
+
+        while True:
+
+            # Receive and decrypt a message from the client
+            received_message = recieve_message()
+
+            # Login Check
+            if received_message[0] == 'L':
+
+                # Separate received_message to username and password
+                received_message = received_message[2:].split(',')
+                username, password = received_message[0], received_message[1]
+
+                # Function will fetch the userID for the given username and password
+                user_id = checkLoginDetails(username, password, connection)
+                message = str(user_id)
+            
+            # Register User
+            if received_message[0] == 'R':
+
+                # Separate received_message to username and password
+                received_message = received_message[2:].split(',')
+                username, password = received_message[0], received_message[1]
+
+                # It takes the user data and registers to database 
+                if registerUser(username, password, connection):
+                    message = "registered"
+                """IN CASE THERE IS A DATABASE ERROR, WE NEED A PROPER ALTERNATIVE MESSAGE TO PROVIDE"""
+            
+            # Encrypted Details Storage
+            if received_message[0] == 'E':
+
+                # Store key and metadata into database
+                storeKeyInDatabase(received_message[2:], connection)
+            
+            # Data for decryption
+            if received_message[0] == 'D':
+
+                # Get key and metadata from database
+                details = getKeyFromDatabase(received_message[2:], connection)
+
+                # Formulate message to send to client
+                message = ','.join(details)
+                print("message for keys to be sent: ", message)
+            
+            # Delete record
+            if received_message[0] == 'O':
+
+                print("Time for deletion")
+
+                # If deletion of record is successful
+                if deleteRecord(received_message[2:], connection):
+                    print("Deletion Successful")
+                """IN CASE THERE IS A DATABASE ERROR, WE NEED A PROPER ALTERNATIVE MESSAGE TO PROVIDE"""
                 
-                # Register Procedure
-                if decrypted_message[:8] == 'register':
+                continue
 
-                    # It takes the user data and registers to database 
-                    if registerUser(decrypted_message[9:], connection):
+            # Send message to client
+            send_message(message)
 
-                        # If registered, send encrypted message to client
-                        message = "registered"
-                        encrypted_response = client_public_key.encrypt(
-                            message.encode(),
-                            padding.OAEP(
-                                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                                algorithm=hashes.SHA256(),
-                                label=None,
-                            ),
-                        )
-                        conn.sendall(encrypted_response)
-
-
-# Maybe I dont need to send encrypted response for each If clause
-
-
-# Run the main function if the script is executed directly
-if __name__ == "__main__":
-    main()
