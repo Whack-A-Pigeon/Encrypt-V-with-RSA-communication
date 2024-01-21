@@ -246,6 +246,9 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
 
                 # Store key and metadata into database
                 storeKeyInDatabase(received_message[2:], connection)
+
+                # Send message that key is stored
+                message = "stored"
             
             # Data for decryption
             if received_message[0] == 'D':
