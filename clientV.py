@@ -133,7 +133,10 @@ def performEncryption(selectedFile, encryptDialog, createNewName, saveInNewLocat
         encrypt_data_list = [fileId.hex(), originalFileName, keyBytes.hex(), iv.hex(), username, password]
         print(type(encrypt_data_list[0])) # DELETE
         print([len(i) for i in encrypt_data_list]) # DELETE
+
+        # Send details to the server and receive confirmation
         send_message("E " + ','.join(encrypt_data_list))
+        message = recieve_message()
         
 
         # Create file with .V extension in the provided directory to write and write the cipher onto it
