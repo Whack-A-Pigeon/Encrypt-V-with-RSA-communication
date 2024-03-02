@@ -15,10 +15,10 @@ Encrypti-V is a simple client-server file encryption and decryption application 
 
 ### Prerequisites
 
-- Python 3.x
+- `Python 3.x`
 - Tkinter (usually included with Python installations)
-- MySQL server
-- pymysql library (install using `pip install pymysql`)
+- `MySQL` server
+- `pymysql` library (install using `pip install pymysql`)
 - cryptography
 
 ### Installation
@@ -63,6 +63,10 @@ Encrypti-V is a simple client-server file encryption and decryption application 
       PRIMARY KEY (file_id),
       FOREIGN KEY (user_id) REFERENCES users(user_id)
       );
+      ```
+   5. Update the database connection details in the `server.py`:
+      ```py
+      connection = pymysql.connect(host="localhost", user="your_username", password="your_password", database="encryptiv_db")
       ```
 ### Usage
   1. **Run the server:**
